@@ -42,6 +42,8 @@ In future versions, we plan to:
 - Output style supporting more information.
 - Optimize runn time of the code (now ~30 seconds for a data set of size 50).
 - Implement a deep learning model for continuous improvement of the machine learning algorithm.
+- Add window background
+- Add costum error messages
 
 ## Getting Started
 
