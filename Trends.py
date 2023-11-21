@@ -129,9 +129,13 @@ def partitioned_ls_alternating(y, P, T, interest):
 
 
 def list_prop_length(a, x0, steps, interest, size):
+    P=np.zeros(len(a))
     for i in range(0, len(x0) + (interest) * steps):
         if i == len(a):
-            a.append(get_data(a, interest, steps, interest, size)["preds"][len(a) - 1])
+            a.append(partitioned_ls_alternating(a,P,20,interest)[0][len(a) - 1]*len(a)+a[0])
+
+            #Change from pls machine learning from itself to it learning from the least squares algorithm:
+            #a.append(get_data(a, interest, steps, interest, size)["preds"][len(a) - 1])
     return a
 
 
@@ -276,6 +280,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
 
     prtn = 0
     total = len(incs)
+    final_pos=x0.copy()
     with alive_bar(total) as bar:
         for i in range(increments, training + steps * future_steps + 1):
 
@@ -290,7 +295,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
                 part_prox_a = list(approx)[0]
                 part_prox_b = list(approx)[1]
                 part_prox = []
-                if i < size:
+                if i <=training:
 
                     final_pos = approx[2]
                 else:
@@ -348,14 +353,20 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     if Plots == "full":
         plt.scatter(x=len(opens) + steps * interest, y=result_Pls, label='PLs Learning Prediction')
         plt.scatter(x=len(opens) + steps * interest, y=result_ls, label='Least Squares Prediction')
-        print("PLs Learning Predictions in the ", steps * interest, " day time frame :", result_Pls,
-              ", the least squares predictions ", result_ls)
+        print("PLs Learning Predictions  calculates the value:",result_Pls," at", steps * interest, " iteration frame while the least squares prediction was:",result_ls)
+        if training!=size:
+            print("The actual value at the same step was:", data[len(data)-1])
     if Plots == "Pls":
         plt.scatter(x=len(opens) + steps * interest, y=result_Pls, label='PLs Learning Prediction')
-        print("The partitioned least squares predictions for the", steps * interest, " day time frame  ", result_Pls)
+        print("The partitioned least squares predictions for the", steps * interest, " iteration time frame  ", result_Pls)
+        if training!=size:
+            print("The actual value at the same step was:", data[len(data)-1])
     if Plots == "Ls":
         plt.scatter(x=len(opens) + steps * interest, y=result_ls, label='Least Squares Prediction')
-        print("The least squares predictions for the", steps * interest, " day time frame  ", result_ls)
+        print("The least squares predictions for the", steps * interest, " iteration time frame  ", result_ls)
+        if training!=size:
+            print("The actual value at the same step was:", data[len(data)-1])
+
 
     plt.suptitle("Analysis")
 
@@ -367,7 +378,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     stop = timeit.default_timer()
 
 
-    print('Time: ', stop - start)
+    print('Run time: ', round(stop - start), "seconds.")
 
     if Plots!="None":
         plt.show()
