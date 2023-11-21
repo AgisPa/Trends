@@ -11,6 +11,10 @@ import time
 from alive_progress import alive_bar
 from alive_progress import config_handler
 import timeit
+import pigar
+pigar
+
+
 
 config_handler.set_global(length=60, spinner="radioactive", bar="bubbles", force_tty=True)
 
@@ -220,26 +224,33 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
 
     # Change below for the minimum partition number as a multiple of the interest.
     increments = int(0.5 * interest)
-    data = pd.read_csv(path, nrows=size)
+
 
     if steps*interest<size-training:
         steps=int((size-training)/interest)
 
-    if path == "BTC-USD.csv":                       
+    if path == "BTC-USD.csv":
+        data = pd.read_csv(path, nrows=size)
         data.reindex(index=data.index[::-1])
         opens = np.array(data["Open"][:training])
         data=data["Open"]
     else:
+        data = pd.read_csv(path, nrows=size)
+
         if path=="example.csv":
             data.reindex(index=data.index[::-1])
-            opens=np.array(data.iloc[:,0])[:training]
-            data=data[0]
+            data = data[str(data.keys().values.tolist()[1])].tolist()
+            opens=np.array(data[:training])
+            # Add column name for the trend data with the following command.
+            # opens=np.array(data["NAME_OF_COLUMN"][:training])
         else:
+            data.reindex(index=data.index[::-1])
+            data = data[str(data.keys().values.tolist()[1])].tolist()
+            opens = np.array(data[:training])
             if len(data[:training]) != training:
                 print("Add column name for trend data analysis at line 242.")
 
-        # Add column name for the trend data with the following command.
-        # opens=np.array(data["NAME_OF_COLUMN"][:training])
+
 
     ls_output=[]
     pls_output=[]
