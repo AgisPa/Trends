@@ -6,9 +6,7 @@ import warnings
 import Plotting
 from scipy.optimize import minimize
 import tkinter as tk
-from tkinter import *
 from tkinter import ttk
-from PIL import  Image
 import time
 from alive_progress import alive_bar
 from alive_progress import config_handler
@@ -227,23 +225,30 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     if steps*interest<size-training:
         steps=int((size-training)/interest)
 
-    if path == "BTC-USD.csv":
+    if path == "BTC-USD.csv":                       
         data.reindex(index=data.index[::-1])
         opens = np.array(data["Open"][:training])
+        data=data["Open"]
     else:
         if path=="example.csv":
             data.reindex(index=data.index[::-1])
             opens=np.array(data.iloc[:,0])[:training]
+            data=data[0]
         else:
             if len(data[:training]) != training:
-                print("Add column name for trend data analysis at line 252.")
+                print("Add column name for trend data analysis at line 242.")
 
         # Add column name for the trend data with the following command.
         # opens=np.array(data["NAME_OF_COLUMN"][:training])
 
-    f_list = []
+    ls_output=[]
+    pls_output=[]
+    weight=[]
+
+    f_list = []                        
     x0 = opens.copy()
     incs = []
+
     for i in range(2, training):
         if i >= increments and training / i > 2 and int(training / i) == training / i or i == interest:
             incs.append(i)
@@ -281,7 +286,20 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
                     final_pos = x0
                 for j in range(0, len(final_pos)):
                     part_prox.append(part_prox_a[j] * j * part_prox_b[j] + final_pos[j])
-                if Plots == "Pls" or Plots == "full":
+
+                opens_data = get_data(final_pos[:training + steps * interest], i, future_steps, interest, training)
+                x0_data = get_data(x0[:training], i, future_steps, interest, len(x0))
+                ls_preds = opens_data["preds"][:len(x0) + steps * interest]
+                ls_preds_down = opens_data["preds_down"][:len(x0) + steps * interest]
+                ls_preds_up = opens_data["preds_up"][:len(x0) + steps * interest]
+                part_average = x0_data["im_rs"]
+                upper_limit = x0_data["uppers"]
+                lower_limit = x0_data["lowers"]
+                volat = x0_data["volat"]
+                ls_output.append(ls_preds)
+                pls_output.append(part_prox)
+
+                if Plots == "Pls" or Plots == "full" or Plots=="None":
                     if approx_label.count("Algorith based on partitions of " + str(i)) == 0:
                         approx_label.append("Algorith based on partitions of " + str(i))
                         plt.plot(part_prox, alpha=f_round, label=approx_label[len(approx_label) - 1])
@@ -290,21 +308,23 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
 
 
 
+
+
                     else:
                         plt.plot(opens[:len(x0)], color="black")
                         plt.plot(opens[len(x0):], color="gray")
                         plt.plot(part_prox, alpha=f_round)
-                if Plots == "full" or Plots == "Ls":
-                    opens_data = get_data(final_pos[:training + steps * interest], i, future_steps, interest, training)
-                    x0_data = get_data(x0[:training], i, future_steps, interest, len(x0))
-                    axs = Plotting.plot_custom_graphs(preds=opens_data["preds"][:len(x0) + steps * interest],
-                                                      preds_up=opens_data["preds_up"][:len(x0) + steps * interest],
-                                                      preds_down=opens_data["preds_down"][:len(x0) + steps * interest],
-                                                      im_rs=x0_data["im_rs"],
-                                                      uppers=x0_data["uppers"],
-                                                      lowers=x0_data["lowers"],
-                                                      opens=data["Open"],
-                                                      volat=x0_data["volat"], max_accuracy=max_levels, accuracy=i,
+                if Plots == "full" or Plots == "Ls" or Plots=="None":
+
+
+                    axs = Plotting.plot_custom_graphs(preds=ls_preds,
+                                                      preds_up=ls_preds_up,
+                                                      preds_down=ls_preds_down,
+                                                      im_rs=part_average,
+                                                      uppers=upper_limit,
+                                                      lowers=lower_limit,
+                                                      opens=data,
+                                                      volat=volat, max_accuracy=max_levels, accuracy=i,
                                                       interest=f_round)
                 last_pos_Pls.append(part_prox[len(part_prox) - 1])
                 last_pos_ls.append(opens_data["preds"][training + steps * interest - 1])
@@ -329,10 +349,18 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     plt.suptitle("Analysis")
 
     plt.legend()
+
+    output ={"ls_predictions": ls_output, "pls_predictions": pls_output,"weight":f_list}
+    output=pd.DataFrame([output])
+    output.to_csv("Trends.csv")
     stop = timeit.default_timer()
 
+
     print('Time: ', stop - start)
-    plt.show()
+
+    if Plots!="None":
+        plt.show()
+
 
 class pop_up_exe(tk.Tk):
 
@@ -365,13 +393,13 @@ class pop_up_exe(tk.Tk):
         e6.insert(5, 20)
         e7.insert(6, "full")
 
-        tk.Label(self, text="Data Path (.csv) or input \"sample\":").grid(row=0)
-        tk.Label(self, text="Size (Recomended~50):").grid(row=1)
+        tk.Label(self, text="Data Path (.csv):").grid(row=0)
+        tk.Label(self, text="Size:").grid(row=1)
         tk.Label(self, text="Time frame of interest:").grid(row=2)
         tk.Label(self, text="Predict steps:").grid(row=3)
         tk.Label(self, text="Training percentage(%):").grid(row=4)
         tk.Label(self, text="Training cycles for each iteration):").grid(row=5)
-        tk.Label(self, text="Plotting(\"Pls\",\"Ls\",\"full\"):").grid(row=6)
+        tk.Label(self, text="Plotting(\"Pls\",\"Ls\",\"full\",\"None\"):").grid(row=6)
 
         def get(e1, e7, e3, e4, e2, e5, e6):
             path = str(e1.get())
