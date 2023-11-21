@@ -1,6 +1,6 @@
 # Trends
 
-Trends is a Python application designed for in-depth analysis of trend lines present in CSV data. Leveraging the pandas DataFrame, the tool intelligently partitions the dataset into subsets with varying sizes, weighted around an increment of interest, enabling a comprehensive and rigorous analysis.
+Trends is a Python application designed for in-depth analysis of trend lines present in data. Leveraging the pandas DataFrame, the tool partitions the dataset into subsets with varying sizes, weighted around an increment of interest, enabling a comprehensive and rigorous analysis.
 
 ## Features
 
