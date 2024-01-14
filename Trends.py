@@ -221,6 +221,7 @@ def bin(x):
 
 
 def probability_density(interest, steps, size, training, ml_steps, path, Plots, start):
+    start_time=timeit.default_timer()
     if interest == 1:
         warnings.warn("Partition size must be bigger that one.")
     # Change below for upper limit of partition number as a multiple of the interest.
@@ -234,10 +235,11 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
         steps=int((size-training)/interest)
 
     if path == "BTC-USD.csv":
-        data = pd.read_csv(path, nrows=size)
-        data.reindex(index=data.index[::-1])
-        opens = np.array(data["Open"][:training])
-        data=data["Open"]
+        ndata = pd.read_csv(path, nrows=size)
+        ndata.reindex(index=ndata.index[::-1])
+        opens = np.array(ndata["Open"][:training])
+        data=ndata["Open"]
+        xdata=pd.read_csv(path, nrows=size+steps*interest)["Date"]
     else:
         data = pd.read_csv(path, nrows=size)
 
@@ -255,19 +257,17 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
                 print("Add column name for trend data analysis at line 242.")
 
 
-
     ls_output=[]
     pls_output=[]
     weight=[]
-
-    f_list = []                        
+    f_list = []
     x0 = opens.copy()
     incs = []
 
     for i in range(2, training):
-        if i >= increments and training / i > 2 and int(training / i) == training / i or i == interest:
+        if (i >= increments and training / i > 2 and int(training / i) == training / i and i<max_levels and i>increments) or i == interest:
             incs.append(i)
-    print("Contributing partitions:", set(incs), "for time frame of interest equal to", interest)
+    print("Contributing partitions:", incs, "for time frame of interest equal to", interest)
 
     if max_levels == "max":
         max_levels = len(opens)
@@ -284,53 +284,47 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     with alive_bar(total) as bar:
         for i in range(increments, training + steps * future_steps + 1):
 
-            if training / i > 2 and int(training / i) == training / i or i == interest:
-
+            if (training / i > 2 and int(training / i) == training / i  and i<max_levels and i>increments )or i == interest:
                 time.sleep(0.1)
-
                 f_list.append((np.sqrt(2) / np.sqrt(np.pi) * np.exp(-(abs(i - int((interest))) / interest) ** 2 / 2)))
                 f_round = (f_list[len(f_list) - 1])
-
                 approx = list(partitioned_least_squares(x0, i, ml_steps, steps, interest, training))
                 part_prox_a = list(approx)[0]
                 part_prox_b = list(approx)[1]
                 part_prox = []
                 if i <=training:
-
                     final_pos = approx[2]
                 else:
                     final_pos = x0
                 for j in range(0, len(final_pos)):
                     part_prox.append(part_prox_a[j] * j * part_prox_b[j] + final_pos[j])
-
-                opens_data = get_data(final_pos[:training + steps * interest], i, future_steps, interest, training)
+                opens_data = get_data(final_pos[:training + steps * interest], i, steps, interest, training)
                 x0_data = get_data(x0[:training], i, future_steps, interest, len(x0))
                 ls_preds = opens_data["preds"][:len(x0) + steps * interest]
+                ls_preds=[k if k!=0 else np.nan for k in ls_preds]
                 ls_preds_down = opens_data["preds_down"][:len(x0) + steps * interest]
+                ls_preds_down=[k if k!=0 else np.nan for k in ls_preds_down]
                 ls_preds_up = opens_data["preds_up"][:len(x0) + steps * interest]
+                ls_preds_up=[k if k!=0 else np.nan for k in ls_preds_up]
                 part_average = x0_data["im_rs"]
                 upper_limit = x0_data["uppers"]
                 lower_limit = x0_data["lowers"]
                 volat = x0_data["volat"]
                 ls_output.append(ls_preds)
+                part_prox=[k if k!=0 else np.nan for k in part_prox]
                 pls_output.append(part_prox)
 
-                if Plots == "Pls" or Plots == "full" or Plots=="None":
+                if Plots == "Pls" or Plots == "full":
                     if approx_label.count("Algorith based on partitions of " + str(i)) == 0:
                         approx_label.append("Algorith based on partitions of " + str(i))
                         plt.plot(part_prox, alpha=f_round, label=approx_label[len(approx_label) - 1])
                     if prtn == 0:
                         prtn += 1
-
-
-
-
-
                     else:
                         plt.plot(opens[:len(x0)], color="black")
                         plt.plot(opens[len(x0):], color="gray")
                         plt.plot(part_prox, alpha=f_round)
-                if Plots == "full" or Plots == "Ls" or Plots=="None":
+                if Plots == "full" or Plots == "Ls" :
 
 
                     axs = Plotting.plot_custom_graphs(preds=ls_preds,
@@ -340,45 +334,23 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
                                                       uppers=upper_limit,
                                                       lowers=lower_limit,
                                                       opens=data,
-                                                      volat=volat, max_accuracy=max_levels, accuracy=i,
+                                                      volat=volat, xdata=xdata, accuracy=i,
                                                       interest=f_round)
                 last_pos_Pls.append(part_prox[len(part_prox) - 1])
                 last_pos_ls.append(opens_data["preds"][training + steps * interest - 1])
-
                 bar()
-
     f_list = [f_list[j] / sum(f_list) for j in range(0, len(f_list))]
     result_ls = sum([f_list[k] * last_pos_ls[k] for k in range(0, len(f_list))])
     result_Pls = sum([f_list[k] * last_pos_Pls[k] for k in range(0, len(f_list))])
-    if Plots == "full":
-        plt.scatter(x=len(opens) + steps * interest, y=result_Pls, label='PLs Learning Prediction')
-        plt.scatter(x=len(opens) + steps * interest, y=result_ls, label='Least Squares Prediction')
-        print("PLs Learning Predictions  calculates the value:",result_Pls," at", steps * interest, " iteration frame while the least squares prediction was:",result_ls)
-        if training!=size:
-            print("The actual value at the same step was:", data[len(data)-1])
-    if Plots == "Pls":
-        plt.scatter(x=len(opens) + steps * interest, y=result_Pls, label='PLs Learning Prediction')
-        print("The partitioned least squares predictions for the", steps * interest, " iteration time frame  ", result_Pls)
-        if training!=size:
-            print("The actual value at the same step was:", data[len(data)-1])
-    if Plots == "Ls":
-        plt.scatter(x=len(opens) + steps * interest, y=result_ls, label='Least Squares Prediction')
-        print("The least squares predictions for the", steps * interest, " iteration time frame  ", result_ls)
-        if training!=size:
-            print("The actual value at the same step was:", data[len(data)-1])
-
-
     plt.suptitle("Analysis")
-
-    plt.legend()
-
+    plt.legend(fontsize=5)
     output ={"ls_predictions": ls_output, "pls_predictions": pls_output,"weight":f_list}
     output=pd.DataFrame([output])
     output.to_csv("Trends.csv")
     stop = timeit.default_timer()
 
 
-    print('Run time: ', round(stop - start), "seconds.")
+    print('Run time: ', round(stop - start_time), "seconds.")
 
     if Plots!="None":
         plt.show()
