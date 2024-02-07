@@ -17,6 +17,7 @@ pigar
 
 
 config_handler.set_global(length=60, spinner="radioactive", bar="bubbles", force_tty=True)
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
 # warnings.simplefilter("ignore")
@@ -39,13 +40,34 @@ def propability(data):
            range(0, len(data))]
     norm = sum(pxs)
 
-    pxs = pxs / norm
+    pxs = [k / norm for k in pxs]
 
     return pxs, sigma, r
 
 
 def rgb_to_hex(r, g, b):
     return '#{:02x}{:02x}{:02x}'.format(r, g, b)
+
+def bin(x):
+    if x:
+        return 1
+    if not x:
+        return 0
+
+def linearly_interpolate_nans(y):
+    return list(pd.Series(y).interpolate())
+
+def remove_spikes(part_prox):
+    diffs = [k - part_prox[i - 1] for i, k in enumerate(part_prox)][1:]
+    diffs.insert(0,0)
+    part_std=np.std([j for j in part_prox if not np.isnan(j)])
+    part_prox_flat = linearly_interpolate_nans(
+        [k if abs(diffs[i - 1]) < 1.5 * part_std else np.nan for i, k in enumerate(part_prox)])
+    if np.isnan(part_prox_flat[0]):
+        part_prox_flat[0]=part_prox_flat[1]
+
+    return  part_prox_flat
+
 
 
 def least_sq(rs):
@@ -64,99 +86,123 @@ def chunks(lst, n):
 
 def partitioned_ls_alternating(y, P, T, interest):
     X = np.linspace(0, len(y), len(y))
-    parts = np.array(P).shape[0]
+    P = np.array(P)
+    if P.ndim > 1:
+        parts = np.array(P).shape[0]
+    else:
+        parts = 1
+    y_ave = np.average(y)
+    y_dev = np.std(y)
 
-    alpha = np.random.randint(0, len(y), len(y))
-    bg = y[0]
-    yx = np.array([i - bg for i in y])
-
-    def b_con(beta):
-        bbs = list(chunks(beta, parts))
-        step = int(len(beta) / parts)
-
-        for i in range(0, step):
-            bbs[i] = sum(list(bbs[i])) / parts
-
-        bb = []
-        beta = list(beta)
-        for i in range(0, step):
-            for j in range(i * parts, (i + 1) * parts):
-                bb.append(bbs[i])
-
-        add = [bb[o] - beta[o] for o in range(0, len(bb))]
-        results = np.sum(add)
-
-        return results / 100000000
+    # alpha = np.random.randint(0, len(y), len(y))
+    alpha = np.array([k - y[i - 1] if i != 0 else 0 for i, k in enumerate(y)])
+    yx = np.array([j-y[i-1] for i,j in enumerate(y)])
 
     res_a = []
-
     res_b = []
-    alpha = np.random.rand(len(y))
-    alpha = [alpha[p] / max(alpha) * interest for p in range(0, len(y))]
     P = np.array(P)
-    beta = np.random.randint(-1, 1, len(y))
+    beta = np.ones(len(y))
     for _ in range(T):
         if _ == 0:
             res_a.append(alpha)
+            res_b.append(beta)
 
-        def min_squares_alpha(alpha):
-            return abs(np.sum(
-                [np.subtract(np.multiply(np.multiply(np.multiply(X, P[i]), alpha), beta), yx) ** 2 for i in
-                 range(0, parts)])) / 1000000000
+        # Convergence according to Lipchitz gradient descent
+        convergence_limit = y_dev / np.std(alpha) * y_ave
+
+        def b_con(beta):
+            bbs = list(chunks(beta, interest))
+            step = len(beta) // interest
+            for i in range(0, step):
+                bbs[i] = sum(list(bbs[i])) / interest
+            bb = []
+            for i in range(0, step):
+                for j in range(0, interest):
+                    bb.append(abs(beta[int(i * j)] - bbs[i]))
+            bb = [k / sum(bb) for k in bb]
+            return np.average(bb) / (convergence_limit * 100)
 
         def min_squares_beta(beta):
             return abs(np.sum(
                 [np.subtract(np.multiply(np.multiply(np.multiply(X, P[i]), alpha), beta), yx) ** 2 for i in
-                 range(0, parts)])) / 1000000000
+                 range(0, parts)])) / convergence_limit
 
-        if _ == 0:
-            res_b.append(beta)
         cons_b = ({'type': 'eq', 'fun': lambda beta: b_con(beta)}
         )
-        result_b = minimize(lambda beta: min_squares_beta(beta), res_b[len(res_b) - 1], method='SLSQP',
-                            constraints=cons_b)
+        result_b = minimize(lambda beta: min_squares_beta(beta), res_b[- 1], method='BFGS',
+                            tol=0.023 * convergence_limit / (_ + 1),
+                            constraints=cons_b, options={'maxiter': 800})
         res_b.append(result_b.x)
+        beta = res_b[- 1]
 
-        cons_a = ({'type': 'eq', 'fun': lambda alpha: sum(alpha) - 1}
-        )
-        result_a = minimize(lambda alpha: min_squares_alpha(alpha), res_a[len(res_a) - 1], method='BFGS')
+        def min_squares_alpha(alpha):
+            return abs(np.sum(
+                [np.subtract(np.multiply(np.multiply(np.multiply(X, P[i]), alpha), beta), yx) ** 2 for i in
+                 range(0, parts)])) / convergence_limit
+
+        result_a = minimize(lambda alpha: min_squares_alpha(alpha), res_a[- 1], method='BFGS', options={'maxiter': 800},
+                            tol=0.023 * convergence_limit / (_ + 1))
+
         res_a.append(result_a.x)
-
-        alpha = res_a[len(res_a) - 1]
-        beta = res_b[len(res_b) - 1]
-
+        alpha = res_a[- 1]
     return alpha, beta
 
 
-def list_prop_length(a, x0, steps, interest, size):
-    P=np.zeros(len(a))
+def list_prop_length(a, x0, steps, interest, T, mult, part):
     for i in range(0, len(x0) + (interest) * steps):
-        if i == len(a):
-            a.append(partitioned_ls_alternating(a,P,20,interest)[0][len(a) - 1]*len(a)+a[0])
+        if i >= len(a):
 
-            #Change from pls machine learning from itself to it learning from the least squares algorithm:
-            #a.append(get_data(a, interest, steps, interest, size)["preds"][len(a) - 1])
+            # Square Incremented Matrix
+            result = [[0 for i in range(len(a))] for j in range(0, part)]
+            for i in range(0, part):
+                for j in range(0, len(a) - 1):
+                    if int(i * (len(a) / part)) == j:
+                        for l in range(0, int(len(a) / part)):
+                            result[i][j + l] = 1
+            new_step = partitioned_ls_alternating(a, result, T, interest)
+
+            # new_step = partitioned_ls_alternating(a, P, T, interest)
+            whole = np.multiply(new_step[0], new_step[1])
+
+            # Weighted extention:
+
+            # Short memory for weights following a e^(-x^2) function which widens for bigger time increments
+            a_std=np.std(a)
+            diffs=[]
+            for i,k in enumerate(a):
+                diffs.append(k-a[i-1])
+            weight = list(sorted([(1 + 1 / len(a)+diffs[-1]/a_std) ** (- interest*((k/ interest) ** 2)/2 ) for k in range(len(a))]))
+            weight = [k / sum(weight) for k in weight]
+            whole = np.multiply(whole, weight)
+
+            # Spring:
+
+            # if whole[-1]<=-0.5*a[-1]:
+            #    total=abs(whole[-1]+a[-1])*np.cos(abs(whole[-1]+0.5*a[-1])/abs(a[-1])*np.pi/2)
+            # else:
+            #    total=whole[-1]+a[-1]
+
+            # total = whole[-1] + a[-1]
+            #total = sum(whole) + sum(np.multiply(weight,a))
+            total = sum(whole) + sum(np.multiply(weight, a))
+            #print(weight)
+            a.append(total)
     return a
 
 
-def partitioned_least_squares(a, part, T, steps, interest, size):
+def partitioned_least_squares(a, part, T, steps, interest, size, mult):
     a = list(a)
     x0 = a.copy()
-    a = list_prop_length(a, x0, steps, interest, size)
-
+    a = list_prop_length(a, x0, steps, interest, T, mult, part)
     result = [[0 for i in range(len(a))] for j in range(0, part)]
     for i in range(0, part):
         for j in range(0, len(a) - 1):
             if int(i * (len(a) / part)) == j:
                 for l in range(0, int(len(a) / part)):
                     result[i][j + l] = 1
-    asd = []
-    b = []
-    if T != 0:
-        approx_alter = partitioned_ls_alternating(a, result, T, interest)
-        asd = approx_alter[0]
-        b = approx_alter[1]
-
+    approx_alter = partitioned_ls_alternating(a, result,  T, interest)
+    asd = approx_alter[0]
+    b = approx_alter[1]
     return asd, b, [a[l] for l in range(0, len(x0) + interest * steps)], interest, x0
 
 
@@ -239,7 +285,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
         ndata.reindex(index=ndata.index[::-1])
         opens = np.array(ndata["Open"][:training])
         data=ndata["Open"]
-        xdata=pd.read_csv(path, nrows=size+steps*interest)["Date"]
+        xdata=pd.read_csv(path, nrows=training+steps*interest)["Date"]
     else:
         data = pd.read_csv(path, nrows=size)
 
@@ -288,7 +334,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
                 time.sleep(0.1)
                 f_list.append((np.sqrt(2) / np.sqrt(np.pi) * np.exp(-(abs(i - int((interest))) / interest) ** 2 / 2)))
                 f_round = (f_list[len(f_list) - 1])
-                approx = list(partitioned_least_squares(x0, i, ml_steps, steps, interest, training))
+                approx = list(partitioned_least_squares(x0, i, ml_steps, steps, interest, training,1))
                 part_prox_a = list(approx)[0]
                 part_prox_b = list(approx)[1]
                 part_prox = []
@@ -348,10 +394,7 @@ def probability_density(interest, steps, size, training, ml_steps, path, Plots, 
     output=pd.DataFrame([output])
     output.to_csv("Trends.csv")
     stop = timeit.default_timer()
-
-
     print('Run time: ', round(stop - start_time), "seconds.")
-
     if Plots!="None":
         plt.show()
 
